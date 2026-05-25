@@ -3,3 +3,4 @@ node_modules
 dist
 .DS_Storeserver/uploads/
 server/uploads/
+.DS_Store
