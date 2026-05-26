@@ -11,8 +11,8 @@ track signature status, and download the signed document.
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/signeasy-demo.git
-cd signeasy-demo
+git clone https://github.com/rahulsharma1509/signeasy2026.git
+cd signeasy2026
 
 # Add your API token
 cp .env.example server/.env
