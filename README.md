@@ -15,13 +15,13 @@ git clone https://github.com/YOUR_USERNAME/signeasy-demo.git
 cd signeasy-demo
 
 # Add your API token
-cp .env.example .env
-# Open .env and fill in your SIGNEASY_API_TOKEN
+cp .env.example server/.env
+# Open server/.env and fill in your SIGNEASY_API_TOKEN
 
 # Start backend
 cd server
 npm install
-npm run dev
+npm start
 
 # In a new terminal, start frontend
 cd client
@@ -36,7 +36,7 @@ Open http://localhost:5173
 The Express backend exists to keep the Signeasy API token server-side.
 The frontend never talks to Signeasy directly — all API calls go
 through /api routes on the Express server. Vite proxies /api calls
-to localhost:3001 to avoid CORS issues.
+to localhost:3002 to avoid CORS issues.
 
 ## API Endpoints
 
@@ -51,8 +51,10 @@ to localhost:3001 to avoid CORS issues.
 
 - Single signer per document
 - No persistent storage — state lives in React
+- Template sending assumes the selected Signeasy template uses signer role ID 1
 
 ## Known Limitations
 
 - No authentication on the Express server
 - State is lost on page refresh
+- Template role mapping may need to change for templates with different role IDs

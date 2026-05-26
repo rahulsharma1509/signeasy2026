@@ -12,9 +12,23 @@ const authHeaders = () => ({
   Authorization: `Bearer ${process.env.SIGNEASY_API_TOKEN}`,
 });
 
+const removeUploadedFile = async (file) => {
+  if (!file?.path) return;
+
+  try {
+    await fs.promises.unlink(file.path);
+  } catch (err) {
+    console.warn('Failed to remove temporary upload:', err.message);
+  }
+};
+
 // STEP 1: Upload PDF as an original document
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'A PDF file is required' });
+    }
+
     console.log('Uploading file to Signeasy:', req.file.originalname);
     const form = new FormData();
     form.append('file', fs.createReadStream(req.file.path), req.file.originalname);
@@ -25,12 +39,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       headers: { ...authHeaders(), ...form.getHeaders() },
     });
 
-    fs.unlinkSync(req.file.path);
     console.log('File uploaded, document ID:', response.data.id);
     res.json({ documentId: response.data.id, name: req.file.originalname });
   } catch (err) {
     console.error('Upload error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to upload document' });
+  } finally {
+    await removeUploadedFile(req.file);
   }
 });
 
@@ -97,7 +112,7 @@ router.post('/send-template', async (req, res) => {
           last_name: signerName.split(' ')[1] || '',
           email: signerEmail,
         }],
-        // ✅ maps recipient_id 1 to role_id 1 (the "Signer" role in the template)
+        // Maps recipient_id 1 to role_id 1, which matches the demo template setup.
         recipient_role_mapping: [{
           role_id: 1,
           recipient_id: 1,
