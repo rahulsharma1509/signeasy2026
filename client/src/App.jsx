@@ -2,95 +2,85 @@ import { useState, useEffect, useRef } from 'react';
 
 const STORAGE_KEY = 'signeasy_history';
 
-// Load history from localStorage
 const loadHistory = () => {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-  } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
 };
 
-// Save history to localStorage
 const saveHistory = (history) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
 };
 
-const statusColor = {
+const STATUS_COLOR = {
   incomplete: 'bg-yellow-100 text-yellow-800',
-  viewed: 'bg-blue-100 text-blue-800',
-  completed: 'bg-green-100 text-green-800',
-  signed: 'bg-green-100 text-green-800',
+  viewed:     'bg-blue-100 text-blue-800',
+  complete:   'bg-green-100 text-green-800',
+  completed:  'bg-green-100 text-green-800',
+  signed:     'bg-green-100 text-green-800',
 };
 
-export default function App() {
-  // Current request state
-  const [mode, setMode] = useState('upload'); // 'upload' or 'template'
-  const [file, setFile] = useState(null);
-  const [documentId, setDocumentId] = useState(null);
-  const [documentName, setDocumentName] = useState('');
-  const [templates, setTemplates] = useState([]);
-  const [selectedTemplate, setSelectedTemplate] = useState('');
-  const [signerName, setSignerName] = useState('');
-  const [signerEmail, setSignerEmail] = useState('');
-  const [requestId, setRequestId] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [statusHistory, setStatusHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+// Signeasy returns "complete" (not "completed") — handle both for safety
+const isDownloadReady = (status) =>
+  status === 'complete' || status === 'completed' || status === 'signed';
 
-  // History of all past requests
-  const [history, setHistory] = useState(loadHistory);
-  const [showHistory, setShowHistory] = useState(false);
+export default function App() {
+  const [mode, setMode]                   = useState('upload');
+  const [file, setFile]                   = useState(null);
+  const [documentId, setDocumentId]       = useState(null);
+  const [documentName, setDocumentName]   = useState('');
+  const [templates, setTemplates]         = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [signerName, setSignerName]       = useState('');
+  const [signerEmail, setSignerEmail]     = useState('');
+  const [requestId, setRequestId]         = useState(null);
+  const [status, setStatus]               = useState(null);
+  const [statusHistory, setStatusHistory] = useState([]);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState(null);
+  const [history, setHistory]             = useState(loadHistory);
+  const [showHistory, setShowHistory]     = useState(false);
 
   const intervalRef = useRef(null);
 
-  // Fetch templates on load
+  // Fetch templates once on mount
   useEffect(() => {
-    const fetchTemplates = async () => {
-      try {
-        const res = await fetch('/api/templates');
-        const data = await res.json();
-        setTemplates(data.templates || []);
-      } catch (e) {
-        console.error('Failed to fetch templates:', e);
-      }
-    };
-    fetchTemplates();
+    fetch('/api/templates')
+      .then((r) => r.json())
+      .then((d) => setTemplates(d.templates || []))
+      .catch(() => {});
   }, []);
 
-  // Poll status every 30 seconds
+  // Poll status every 30 seconds when a request is active
   useEffect(() => {
     if (!requestId) return;
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/status/${requestId}`);
+        const res  = await fetch(`/api/status/${requestId}`);
         const data = await res.json();
-        if (data.status) {
-          setStatus(data.status);
-          setStatusHistory((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.status === data.status) return prev;
-            const updated = [...prev, { status: data.status, time: new Date().toLocaleTimeString() }];
-            // Update history in localStorage
-            setHistory((h) => {
-              const updated2 = h.map((item) =>
-                item.requestId === requestId
-                  ? { ...item, status: data.status }
-                  : item
-              );
-              saveHistory(updated2);
-              return updated2;
-            });
+        if (!data.status) return;
+
+        setStatus(data.status);
+        setStatusHistory((prev) => {
+          if (prev[prev.length - 1]?.status === data.status) return prev;
+          const next = [...prev, { status: data.status, time: new Date().toLocaleTimeString() }];
+          // Keep history record in sync
+          setHistory((h) => {
+            const updated = h.map((item) =>
+              item.requestId === requestId ? { ...item, status: data.status } : item
+            );
+            saveHistory(updated);
             return updated;
           });
-        }
-      } catch (e) {
-        console.error('Poll error:', e);
+          return next;
+        });
+      } catch {
+        // silent — polling failure shouldn't surface as an error
       }
     };
 
     poll();
-    intervalRef.current = setInterval(poll, 30000); // 30 seconds
+    intervalRef.current = setInterval(poll, 30000);
     return () => clearInterval(intervalRef.current);
   }, [requestId]);
 
@@ -103,7 +93,7 @@ export default function App() {
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: form });
+      const res  = await fetch('/api/upload', { method: 'POST', body: form });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setDocumentId(data.documentId);
@@ -120,39 +110,37 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      let res, data;
-      if (mode === 'template') {
-        res = await fetch('/api/send-template', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ templateId: selectedTemplate, signerName, signerEmail }),
-        });
-      } else {
-        res = await fetch('/api/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ documentId, signerName, signerEmail }),
-        });
-      }
-      data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setRequestId(data.requestId);
+      const endpoint = mode === 'template' ? '/api/send-template' : '/api/send';
+      const body     = mode === 'template'
+        ? { templateId: selectedTemplate, signerName, signerEmail }
+        : { documentId, signerName, signerEmail };
 
-      const templateName = templates.find(t => String(t.id) === String(selectedTemplate))?.name || '';
-      const newEntry = {
-        requestId: data.requestId,
+      const res  = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      setRequestId(data.requestId);
+      setStatus('incomplete');
+      setStatusHistory([{ status: 'incomplete', time: new Date().toLocaleTimeString() }]);
+
+      const templateName = templates.find((t) => String(t.id) === String(selectedTemplate))?.name || '';
+      const entry = {
+        requestId:    data.requestId,
         documentName: mode === 'template' ? `Template: ${templateName}` : documentName,
         signerName,
         signerEmail,
-        status: 'incomplete',
-        sentAt: new Date().toLocaleString(),
+        status:       'incomplete',
+        sentAt:       new Date().toLocaleString(),
       };
-      const updatedHistory = [newEntry, ...history];
-      setHistory(updatedHistory);
-      saveHistory(updatedHistory);
-
-      setStatusHistory([{ status: 'incomplete', time: new Date().toLocaleTimeString() }]);
-      setStatus('incomplete');
+      setHistory((h) => {
+        const updated = [entry, ...h];
+        saveHistory(updated);
+        return updated;
+      });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -160,8 +148,10 @@ export default function App() {
     }
   };
 
-  const handleDownload = () => {
-    window.open(`/api/download/${requestId}`, '_blank');
+  const handleDownload = async (id = requestId) => {
+    if (!id) return;
+    // Open in new tab — browser will trigger the PDF download
+    window.open(`/api/download/${id}`, '_blank');
   };
 
   const handleLoadFromHistory = (entry) => {
@@ -180,6 +170,7 @@ export default function App() {
   };
 
   const resetForm = () => {
+    clearInterval(intervalRef.current);
     setFile(null);
     setDocumentId(null);
     setDocumentName('');
@@ -190,7 +181,6 @@ export default function App() {
     setStatus(null);
     setStatusHistory([]);
     setError(null);
-    clearInterval(intervalRef.current);
   };
 
   return (
@@ -236,15 +226,25 @@ export default function App() {
                   <p className="text-xs text-gray-500">To: {entry.signerName} ({entry.signerEmail})</p>
                   <p className="text-xs text-gray-400">Sent: {entry.sentAt}</p>
                   <div className="flex items-center justify-between">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[entry.status] || 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[entry.status] || 'bg-gray-100 text-gray-600'}`}>
                       {entry.status}
                     </span>
-                    <button
-                      onClick={() => handleLoadFromHistory(entry)}
-                      className="text-xs text-indigo-600 hover:underline"
-                    >
-                      Track →
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {isDownloadReady(entry.status) && (
+                        <button
+                          onClick={() => handleDownload(entry.requestId)}
+                          className="text-xs text-green-600 hover:underline"
+                        >
+                          ⬇️ Download
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleLoadFromHistory(entry)}
+                        className="text-xs text-indigo-600 hover:underline"
+                      >
+                        Track →
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -252,7 +252,7 @@ export default function App() {
           </div>
         )}
 
-        {/* MODE SELECTOR — only show if no active request */}
+        {/* MODE SELECTOR — only before a request is active */}
         {!requestId && (
           <div className="bg-white rounded-xl shadow p-5 space-y-3">
             <h2 className="font-semibold text-lg">Choose Document Type</h2>
@@ -285,13 +285,13 @@ export default function App() {
             />
             <button
               onClick={handleUpload}
-              disabled={!file || loading || documentId}
+              disabled={!file || loading || !!documentId}
               className="bg-indigo-600 text-white px-4 py-2 rounded disabled:opacity-50"
             >
               {loading && !documentId ? 'Uploading...' : 'Upload'}
             </button>
             {documentId && (
-              <p className="text-green-600 text-sm">✅ Document uploaded: {documentName} (ID: {documentId})</p>
+              <p className="text-green-600 text-sm">✅ Uploaded: {documentName} (ID: {documentId})</p>
             )}
           </div>
         )}
@@ -301,7 +301,7 @@ export default function App() {
           <div className="bg-white rounded-xl shadow p-5 space-y-3">
             <h2 className="font-semibold text-lg">Step 1 — Select Template</h2>
             {templates.length === 0 ? (
-              <p className="text-sm text-gray-400">No templates found in your Signeasy account. Create one at signeasy.com first.</p>
+              <p className="text-sm text-gray-400">No templates found. Create one at signeasy.com first.</p>
             ) : (
               <select
                 value={selectedTemplate}
@@ -356,7 +356,7 @@ export default function App() {
               Sent to: <span className="font-medium">{signerName} ({signerEmail})</span>
             </p>
             {status && (
-              <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${statusColor[status] || 'bg-gray-100 text-gray-600'}`}>
+              <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLOR[status] || 'bg-gray-100 text-gray-600'}`}>
                 {status.toUpperCase()}
               </span>
             )}
@@ -366,19 +366,19 @@ export default function App() {
               ))}
             </div>
             <p className="text-xs text-gray-400">Auto-refreshes every 30 seconds</p>
-          </div>
-        )}
 
-        {/* STEP 4 — Download */}
-        {(status === 'completed' || status === 'signed') && (
-          <div className="bg-white rounded-xl shadow p-5 space-y-3">
-            <h2 className="font-semibold text-lg">Step 4 — Download</h2>
-            <button
-              onClick={handleDownload}
-              className="bg-green-600 text-white px-4 py-2 rounded"
-            >
-              ⬇️ Download Signed Document
-            </button>
+            {isDownloadReady(status) ? (
+              <button
+                onClick={() => handleDownload()}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
+              >
+                ⬇️ Download Signed Document
+              </button>
+            ) : (
+              <p className="text-xs text-gray-400 italic">
+                Download will appear once signing is complete.
+              </p>
+            )}
           </div>
         )}
 
